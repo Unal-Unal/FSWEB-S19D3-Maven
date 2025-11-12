@@ -10,20 +10,20 @@ import com.workintech.s19d2.repository.MemberRepository;
 import com.workintech.s19d2.repository.RoleRepository;
 import com.workintech.s19d2.service.AccountServiceImpl;
 import com.workintech.s19d2.service.AuthenticationService;
+import com.workintech.s19d2.service.MemberServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.*;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -35,8 +35,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 @DataJpaTest
 @ActiveProfiles("test")
@@ -70,31 +69,46 @@ class MainTest {
     @BeforeEach
     void setUp() {
 
+        // Member ve Role objeleri
         member = new Member();
         roleUser = new Role();
         roleAdmin = new Role();
-
 
         roleUser.setId(1L);
         roleUser.setAuthority("USER");
         roleAdmin.setId(2L);
         roleAdmin.setAuthority("ADMIN");
 
-
         member.setEmail("test@example.com");
         member.setPassword("password");
-        member.setRoles(Arrays.asList(roleUser, roleAdmin));
+        member.setRoles(Set.of(roleUser, roleAdmin));
 
+        // role objesini initialize et (grantedAuthorityImplementation ve roleSettersAndGetters için)
         role = new Role();
         role.setId(1L);
         role.setAuthority("USER");
 
+        // Account objesi
         account = new Account();
         account.setId(1L);
         account.setName("Test Account");
 
+        // Mock repository
+        mockAccountRepository = mock(AccountRepository.class);
+        mockMemberRepository = mock(MemberRepository.class);
+        mockRoleRepository = mock(RoleRepository.class);
+
+        // Password encoder
+        passwordEncoder = new BCryptPasswordEncoder();
+
+        // MemberService oluştur (mock repository ile)
+        MemberServiceImpl memberService = new MemberServiceImpl(mockMemberRepository, mockRoleRepository, passwordEncoder);
+
+        // AuthenticationService oluştur (MemberService ve PasswordEncoder ile)
+        authenticationService = new AuthenticationService(memberService, passwordEncoder);
+
+        // AccountService oluştur
         accountService = new AccountServiceImpl(mockAccountRepository);
-        authenticationService = new AuthenticationService(mockMemberRepository, mockRoleRepository, passwordEncoder);
     }
 
     @Test
@@ -109,10 +123,17 @@ class MainTest {
     void memberAuthorities() {
         Collection<? extends GrantedAuthority> authorities = member.getAuthorities();
 
-        assertNotNull(authorities, "Authorities collection should not be null.");
-        assertEquals(2, authorities.size(), "There should be two roles assigned to the member.");
-        assertTrue(authorities.containsAll(Arrays.asList(roleUser, roleAdmin)), "The authorities should include USER and ADMIN roles.");
+        assertNotNull(authorities, "Authorities collection should not be null");
+        assertEquals(2, authorities.size(), "There should be two roles assigned to the member");
+
+        List<String> roleNames = authorities.stream()
+                .map(GrantedAuthority::getAuthority)
+                .toList();
+
+        assertTrue(roleNames.containsAll(Arrays.asList("USER", "ADMIN")),
+                "The authorities should include USER and ADMIN roles");
     }
+
 
     @Test
     @DisplayName("UserDetails Implementations")
@@ -182,14 +203,18 @@ class MainTest {
     @Test
     @DisplayName("RegisterResponse Data Storage")
     void registerResponseDataStorage() {
+        Long id = 1L; // Örnek ID
         String email = "test@example.com";
         String message = "Registration successful";
 
-        RegisterResponse response = new RegisterResponse(email, message);
+        // Artık "created" yok, direkt değerleri veriyoruz
+        RegisterResponse response = new RegisterResponse(id, email, message);
 
         assertEquals(email, response.email(), "Email should match the one provided");
         assertEquals(message, response.message(), "Message should match the one provided");
+        assertEquals(id, response.id(), "ID should match the one provided");
     }
+
 
 
     @Test
@@ -231,17 +256,31 @@ class MainTest {
     @Test
     @DisplayName("Register New Member Successfully")
     void registerNewMemberSuccessfully() {
-        given(mockMemberRepository.findByEmail(anyString())).willReturn(Optional.empty());
-        given(passwordEncoder.encode(anyString())).willReturn("password");
-        given(mockRoleRepository.findByAuthority("ADMIN")).willReturn(Optional.of(role));
-        given(mockMemberRepository.save(any(Member.class))).willReturn(member);
+        // role nesnesi null olmamalı
+        Role adminRole = new Role();
+        adminRole.setId(1L);
+        adminRole.setAuthority("ADMIN");
 
+        // Doğru stubbing
+        when(mockMemberRepository.findByEmail(anyString())).thenReturn(Optional.empty());
+        when(passwordEncoder.encode(anyString())).thenReturn("encodedPassword");
+        when(mockRoleRepository.findByAuthority("ADMIN")).thenReturn(Optional.of(adminRole));
+        when(mockMemberRepository.save(any(Member.class))).thenReturn(member);
+
+        // register çağrısı
         Member registeredMember = authenticationService.register("test@example.com", "password");
 
-        assertThat(registeredMember.getEmail()).isEqualTo("test@example.com");
-        assertThat(registeredMember.getPassword()).isEqualTo("password");
+        // assert
+        assertEquals("test@example.com", registeredMember.getEmail());
+        assertEquals("encodedPassword", registeredMember.getPassword());
+
+        // verify
         verify(mockMemberRepository).save(any(Member.class));
     }
+
+
+
+
 
     @Test
     @DisplayName("Register Member Throws Exception When Email Exists")

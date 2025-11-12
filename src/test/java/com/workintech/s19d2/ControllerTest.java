@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -41,25 +42,29 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(value = {AuthController.class, AccountController.class} )
-@Import(SecurityConfig.class)
 @ExtendWith(ResultAnalyzer2.class)
 class ControllerTest {
 
 
-    @MockBean
-    private AccountService accountService;
-    @MockBean
-    private UserDetailsService userDetailsService;
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @MockBean
+    private AccountService accountService;
 
     @MockBean
     private AuthenticationService authenticationService;
 
+    @MockBean
+    private UserDetailsService userDetailsService;
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    @MockBean
+    private com.workintech.s19d2.repository.MemberRepository memberRepository;
+
+
 
     private Account account;
 
@@ -77,7 +82,7 @@ class ControllerTest {
         List<Account> accounts = Arrays.asList(account);
         given(accountService.findAll()).willReturn(accounts);
 
-        mockMvc.perform(get("/account"))
+        mockMvc.perform(get("/workintech/accounts"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$", hasSize(1)))
@@ -90,7 +95,7 @@ class ControllerTest {
     void saveAccount() throws Exception {
         given(accountService.save(account)).willReturn(account);
 
-        mockMvc.perform(post("/account")
+        mockMvc.perform(post("/workintech/account")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(account)))
                 .andExpect(status().isOk())
@@ -110,7 +115,7 @@ class ControllerTest {
         given(authenticationService.register(any(String.class), any(String.class))).willReturn(createdMember);
 
 
-        mockMvc.perform(post("/auth/register")
+        mockMvc.perform(post("/workintech/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(registrationMember)))
                 .andExpect(status().isOk())
@@ -123,17 +128,18 @@ class ControllerTest {
     void accessPermittedEndpointsWithoutAuthentication() throws Exception {
         RegistrationMember registrationMember = new RegistrationMember("test@example.com", "password123");
         Member member = new Member();
-        member.setId(1l);
+        member.setId(1L);
         member.setEmail("test@example.com");
         member.setPassword("password123");
 
-        when(authenticationService.register(any(), any())).thenReturn(member);
+        // Doğru metod ile mock
+        when(authenticationService.registerUser(any(Member.class))).thenReturn(member);
 
-        mockMvc.perform(post("/auth/register")
+        mockMvc.perform(post("/workintech/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(registrationMember)))
+                        .content(objectMapper.writeValueAsString(registrationMember))
+                        .with(csrf()))
                 .andExpect(status().isOk());
-
     }
 
     @Test
@@ -145,7 +151,7 @@ class ControllerTest {
     @Test
     @WithMockUser(username = "admin", authorities = {"ADMIN"})
     void accessSecuredEndpointsWithProperRoleShouldSucceed() throws Exception {
-        mockMvc.perform(get("/account"))
+        mockMvc.perform(get("/workintech/accounts"))
                 .andExpect(status().isOk());
     }
 
